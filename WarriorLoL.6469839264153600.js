@@ -406,9 +406,12 @@ GameManager.Actions = Object.freeze({
 	"HUNTING": 1,
 	"SHOPPING": 2,
 	"MOVING": 3,
-	"RETURN": 4
+	"RETURN": 4,
+	"RESPAWN": 5
 });
 GameManager.checkAction = function(){
+	if(character.rip)
+	   return GameManager.Actions.RESPAWN;
 	if(GameManager.needReturn)
 		return GameManager.Actions.RETURN;
 	if(!ShoppingManager.isEnoughPotion()) 
@@ -463,6 +466,10 @@ GameManager.Tick = Object.freeze({
 	returning: GameManager.Action(function(){
 		set_message("Return Town");
 		CharacterManager.returnTown();
+	}),
+	respawn: GameManager.Action(function(){
+		set_message("Respawn");
+		respawn();
 	})
 });
 
@@ -497,6 +504,9 @@ GameManager.idlePlay = function(){
 					break;
 				case GameManager.Actions.RETURN:
 					GameManager.Tick.returning();
+					break;
+				case GameManager.Actions.RESPAWN:
+					GameManager.Tick.respawn();
 					break;
 				default:
 					DevTool.error("unexpected error - GameManager.idlePlay");
