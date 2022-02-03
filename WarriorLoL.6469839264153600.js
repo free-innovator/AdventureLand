@@ -29,241 +29,33 @@ function Util(){
 Util.getElapsedTime = function(date){	
 	return date? Date.now() - date.getTime() : Infinity;
 };
-Util.sleep = function(ms){ // with await
+Util.sleep = function(ms = character.ping){ // with await
 	return new Promise((resolve) => setTimeout(resolve, ms));
 };
 /* END Util */
 
 /**
-	CharacterManager
+	Delay
 */
-function CharacterManager() {
-    throw new Error('This is a static class');
-}
-
-CharacterManager.Actions = Object.freeze({
-	loot: () => loot(),
-	hunting: function(){
-		if(character.rip || is_moving(character)) return;
-	
-		const target = 
-			  get_targeted_monster() || CharacterManager.getTargetMonster();
-
-		if(target){
-			change_target(target);
-		}else{
-			set_message("No Monsters");
-			return;
-		}
-
-		if(!is_in_range(target)){
-			move(
-				character.x+(target.x-character.x)/2,
-				character.y+(target.y-character.y)/2
-			); // Walk half the distance
-		}else if(can_attack(target)){
-			set_message("Attacking");
-			attack(target).then(() => reduce_cooldown("attack", character.ping));
-			CharacterManager.attackDate = new Date();
-		}
-	},
-	usePotion: function(){
-		if(character.hp / character.max_hp < 
-		   GameManager.Potion.HP_USE_RATIO) CharacterManager.useHPotion();
-		if(character.mp / character.max_mp <
-		   GameManager.Potion.MP_USE_RATIO) CharacterManager.useMPotion();
-	}
-});
-
-CharacterManager.smartMove = async function(dest){
-	if(!is_moving(character)){
-		await smart_move({to: dest});
-	}
-};
-CharacterManager.getAttackElapsedTime = function(){
-	if(!CharacterManager.attackDate) return 0;
-	return Util.getElapsedTime(CharacterManager.attackDate);
-};
-CharacterManager.getTargetMonster = function(type){
-	return get_nearest_monster({
-		min_xp: GameManager.Monster.MIN_XP, 
-		max_att: GameManager.Monster.MAX_ATTACK,
-		type: type
-	});
-};
-CharacterManager.isInBattleArea = function(){
-	const monster = 
-		 CharacterManager.getTargetMonster(GameManager.Monster.TARGET_NAME);
-	return !!monster;
-};
-CharacterManager.isInTown = function(){
-	return Math.abs(character.x) < 200 && Math.abs(character.y) < 200;
-};
-CharacterManager.isOnPotionCooldown = function(type){
-	let boolA;
-	const boolB = is_on_cooldown(`use_${type}p`);
-	if(type === "h"){
-		boolA = Util.getElapsedTime(
-			CharacterManager.useHPotionDate) < G.skills.use_hp.cooldown	
-	}else if(type === "m"){
-		boolA = Util.getElapsedTime(
-			CharacterManager.useMPotionDate) < G.skills.use_mp.cooldown	
-	}
-	
-	return boolA || boolB;
-};
-CharacterManager.isCanMoveToTarget = function(target){
-	target = target || get_targeted_monster();
-	return target ? can_move_to(target) : true;
-};
-
-CharacterManager._usePotion = function(type){
-	const skill = `use_${type}p`;
-	if(!CharacterManager.isOnPotionCooldown(type)){
-		use_skill(skill);
-		game_log(`use ${type.toUpperCase()}P potion`);
-		
-		if(type === 'h'){
-			CharacterManager.useHPotionDate = new Date();
-		}else if(type === 'm'){
-			CharacterManager.useMPotionDate = new Date();
-		}
-	}
-};
-CharacterManager.useHPotion = function(){
-	CharacterManager._usePotion('h');
-};
-CharacterManager.useMPotion = function(){
-	CharacterManager._usePotion('m');
-};
-CharacterManager.returnTown = async function(){
-	if(CharacterManager.isInTown()){
-		GameManager.needReturn = false;
-		stop("smart", 0);
-	}else{
-		use_skill("use_town");
-		CharacterManager.smartMove("town");
-	}
-};
-
-CharacterManager._getPotionCnt = function(type, grade){
-	grade = grade? grade : 0;
-	const item = character.items.find(x => x && x.name === `${type}pot${grade}`);
-	return item? item.q : 0;
-};
-CharacterManager.getHPotionCnt = function(grade){
-	return CharacterManager._getPotionCnt('h', grade);
-};
-CharacterManager.getMPotionCnt = function(grade){
-	return CharacterManager._getPotionCnt('m', grade);
-};
-/* END CharacterManager */
-
-/**
-	ShoppingManager
-*/
-function ShoppingManager(){
+function Delay(){
 	throw new Error('This is a static class');
 }
-ShoppingManager.isShopping = false;
-ShoppingManager._buyItem = function(item, value, msg){
-	if(!Number.isInteger(value)) dt.error("Value is not integer - ._buyItem");
-	
-	if(ShoppingManager.isShopping) return;
-	ShoppingManager.isShopping = true;
-	
-	buy(item, value)
-		.then(function(data){
-			game_log(msg);
-		})
-		.catch(function(data){
-			switch(data.reason){
-				case "distance":
-					GameManager.needReturn = true;
-					break;
-			}		
-		})
-		.finally(function(){
-			ShoppingManager.isShopping = false;
-		});
+Delay.add = function(callback, is_await = true){
+	Delay[callback.name] = async function(){
+		if(is_await){
+			await callback.apply(null, arguments);
+		}else{
+			callback.apply(null, arguments);
+		}		
+		await Util.sleep(character.ping);
+	};
 };
-ShoppingManager._buyPotion = function(type, grade, value){
-	ShoppingManager._buyItem(
-		`${type}pot${grade}`,
-		value,
-		`Bought ${value} ${type.toUpperCase()}P potion.`
-	);
-}
-ShoppingManager.buyHPotion = async function(grade, value) {
-	await ShoppingManager._buyPotion('h', grade, value);
-};
-ShoppingManager.buyMPotion = async function(grade, value) {
-	await ShoppingManager._buyPotion('m', grade, value);
-};
-ShoppingManager.isEnoughHPotion = function(){
-	return CharacterManager.getHPotionCnt(
-		GameManager.Potion.HP_GRADE) >= GameManager.Potion.MIN_CNT;
-};
-ShoppingManager.isEnoughMPotion = function(){
-	return CharacterManager.getMPotionCnt(
-		GameManager.Potion.MP_GRADE) >= GameManager.Potion.MIN_CNT;
-};
-ShoppingManager.isEnoughPotion = function(){
-	let boolHP = ShoppingManager.isEnoughHPotion();
-	let boolMP = ShoppingManager.isEnoughMPotion();
-	return boolHP && boolMP;
-};
-ShoppingManager.refillPotion = function(){
-	const hgrade = GameManager.Potion.HP_GRADE;
-	const mgrade = GameManager.Potion.MP_GRADE;
-	const targetCnt = GameManager.Potion.REFILL_CNT;
-
-	if(!ShoppingManager.isEnoughHPotion()){
-		ShoppingManager.buyHPotion(hgrade, 
-			targetCnt - CharacterManager.getHPotionCnt(hgrade));
-	}
-	if(!ShoppingManager.isEnoughMPotion()){
-		ShoppingManager.buyMPotion(mgrade, 
-			targetCnt - CharacterManager.getMPotionCnt(mgrade));
-	}
-};
-/* END ShoppingManager */
-
-/**
-	PartyManager
-*/
-function PartyManager() {
-    throw new Error('This is a static class');
-}
-PartyManager.INTERVAL_TIME = 10000;
-PartyManager.inviteParty = function(name){
-	game_log("PartyManager.inviteParty");
-	
-	let cnt = 0;
-	const intervalID = setInterval(function(){
-		const state = get_active_characters()[name];
-		
-		if(state === "code" || state === "active"){
-			send_party_invite(name);
-		}
-		if(PartyManager.isInParty(name)){
-			clearInterval(intervalID);
-		}
-	}, PartyManager.INTERVAL_TIME);
-};
-PartyManager.acceptParty = function(){
-	game_log("PartyManager.acceptParty");
-	const intervalID = setInterval(function(){
-		accept_party_invite(GameManager.Player.main);
-		if(PartyManager.isInParty()){
-			clearInterval(intervalID);
-		}
-	}, PartyManager.INTERVAL_TIME);
-};
-PartyManager.isInParty = function(name){
-	name = name || character.name;
-	return !!get_party()[name];
-};
+Delay.add(equip);
+Delay.add(start_character, false);
+Delay.add(stop_character);
+Delay.add(send_party_request);
+Delay.add(send_cm);
+/* END Delay */
 
 /**
 	ObserverManager
@@ -273,8 +65,8 @@ function ObserverManager() {
 }
 
 ObserverManager.create = function(){
-	const right = "100px";
-	const top = "175px";
+	const right = "20px";
+	const top = "165px";
 	const width = "450px";
 	const height = "269px";
 	const btnSize = "16px";
@@ -295,7 +87,7 @@ ObserverManager.create = function(){
 			id="L_close_observer_btn" 
 			style="
 				position: absolute; z-index: 100; right: 2px; top: 2px;
-				width: ${btnSize}; height: ${btnSize}; 
+				width: ${"0px"}; height: ${"0px"}; 
 				border-radius: 50%; box-sizing: border-box;
 				background: rgb(243,115,53);
 				cursor: pointer; 
@@ -309,7 +101,7 @@ ObserverManager.create = function(){
 		<div 
 			id="L_observer_window" 
 			style="
-				position: absolute; right: 0px; width: ${width}; height: ${height}; 
+				position: absolute; right: 0px; width: ${"0px"}; height: ${"0px"}; 
 				background: rgb(0, 0, 0); overflow: hidden;
 				border: ${borderWidth} solid; 
 				border-image: linear-gradient(45deg, #FDC830, #F37335);
@@ -372,6 +164,438 @@ ObserverManager.create = function(){
 /* END ObserverManager */
 
 /**
+	CharacterManager
+*/
+function CharacterManager() {
+    throw new Error('This is a static class');
+}
+//////////////////////////////////////////////
+// user setting
+CharacterManager.Equipment = Object.freeze({
+	ring1: "ringsj",
+	ring2: "ringsj",
+	earring1: null,
+	earring2: null,
+	belt: "hpbelt",
+	mainhand: Object.freeze({
+		warrior: "blade",
+		mage: null,
+		priest: null
+	}),
+	offhand: Object.freeze({
+		warrior: "wshield",
+		mage: null,
+		priest: null
+	}),
+	helmet: "helmet",
+	chest: "coat",
+	pants: "pants",
+	shoes: "shoes",
+	gloves: "gloves",
+	amulet: "hpamulet",
+	orb: "test_orb",
+	elixir: null,
+	cape: null
+});
+// END user setting
+//////////////////////////////////////////////
+CharacterManager.Skills = Object.freeze({
+	Date: {}
+});
+CharacterManager.Actions = Object.freeze({
+	loot: () => loot(),
+	hunting: async function(){
+		if(character.rip || is_moving(character)) return;
+	
+		const target = 
+			  get_targeted_monster() || CharacterManager.getTargetMonster();
+
+		if(target){
+			change_target(target);
+		}else{
+			set_message("No Monsters");
+			return;
+		}
+
+		if(!is_in_range(target)){
+			move(
+				character.x+(target.x-character.x)/2,
+				character.y+(target.y-character.y)/2
+			); // Walk half the distance
+		}else if(can_attack(target)){
+			await CharacterManager.useSkill("attack", target);
+		}
+	},
+	usePotion: async function(){
+		if(character.hp / character.max_hp < GameManager.Potion.HP_USE_RATIO) 
+			await CharacterManager.useHPotion();
+		if(character.mp / character.max_mp < GameManager.Potion.MP_USE_RATIO)
+			await CharacterManager.useMPotion();
+	}
+});
+
+CharacterManager.smartMove = async function(dest){
+	if(!is_moving(character)){
+		await smart_move({to: dest});
+	}
+};
+CharacterManager.getTargetMonster = function(type){
+	return get_nearest_monster({
+		min_xp: GameManager.Monster.MIN_XP, 
+		max_att: GameManager.Monster.MAX_ATTACK,
+		type: type
+	});
+};
+CharacterManager.isSkillCooldown = function(skill){
+	if(!G.skills[skill]) return true;
+	
+	const elapsedTime = Util.getElapsedTime(CharacterManager.Skills.Date[skill]);
+	return elapsedTime < G.skills[skill].cooldown;
+};
+
+CharacterManager.isInBattleArea = function(){
+	const monster = 
+		 CharacterManager.getTargetMonster(GameManager.Monster.TARGET_NAME);
+	return !!monster;
+};
+CharacterManager.isInTown = function(){
+	return Math.abs(character.x) < 200 && Math.abs(character.y) < 200;
+};
+CharacterManager.isOnCooldown = function(skill){
+	return is_on_cooldown(skill) || CharacterManager.isSkillCooldown(skill);
+};
+CharacterManager.isCanMoveToTarget = function(target){
+	target = target || get_targeted_monster();
+	return target ? can_move_to(target) : true;
+};
+
+CharacterManager.useSkill = function(skill, target, extra_arg){
+	if(!G.skills[skill]) return false;
+	
+	return new Promise(async (resolve) => {
+		if(!CharacterManager.isOnCooldown(skill)){
+			set_message(`S - ${skill}`);
+
+			switch(skill){
+				case "attack":
+					attack(target).then(
+						function(data){
+							CharacterManager.Skills.Date[skill] = new Date();
+						},
+						function(data){
+							game_log("oh no, attack failed: " + data.reason);
+						},
+					).finally(resolve);
+					break;
+				default:
+					await use_skill(skill);
+					CharacterManager.Skills.Date[skill] = new Date();
+					resolve();
+					break;
+			}
+		}
+	});
+};
+CharacterManager._usePotion = async function(type){
+	const skill = `use_${type}p`;
+	if(!CharacterManager.isOnCooldown(skill)){
+		await CharacterManager.useSkill(skill);
+		game_log(`use ${type.toUpperCase()}P potion`);
+	}
+};
+CharacterManager.useHPotion = async function(){
+	await CharacterManager._usePotion('h');
+};
+CharacterManager.useMPotion = async function(){
+	await CharacterManager._usePotion('m');
+};
+CharacterManager.returnTown = function(){
+	if(CharacterManager.isInTown()){
+		GameManager.needReturn = false;
+		stop("smart", 0);
+	}else{
+		use_skill("use_town");
+		CharacterManager.smartMove("town");
+	}
+};
+
+CharacterManager.getItem = function(name){
+	return character.items.find(x => x && x.name === name);	
+}
+CharacterManager.getItemCnt = function(name){
+	const item = CharacterManager.getItem(name);
+	return item? item.q : 0;
+}
+CharacterManager._getPotionCnt = function(type, grade = 0){
+	return CharacterManager.getItemCnt(`${type}pot${grade}`);
+};
+CharacterManager.getHPotionCnt = function(grade){
+	return CharacterManager._getPotionCnt('h', grade);
+};
+CharacterManager.getMPotionCnt = function(grade){
+	return CharacterManager._getPotionCnt('m', grade);
+};
+
+CharacterManager.getBestItem = function(name){ // return [item, index];
+	return character.items.reduce((acc, cur, idx) => {
+		if(cur !== null && cur.name === name){
+			if(acc[0] === null){
+				return [cur, idx];	
+			}else if(cur.level !== undefined && cur.level > acc[0].level){
+				return [cur, idx];
+			}
+		}
+		return acc;
+	}, [null, -1]);
+};
+CharacterManager.getEquipmentNameAll = function(){
+	const result = [];
+	const keys = Object.keys(CharacterManager.Equipment);
+	
+	for(let i=0; i<keys.length; i++){
+		const key = keys[i];
+		const value = CharacterManager.Equipment[key];
+		let name = null;
+		
+		switch(key){
+			case "mainhand":
+			case "offhand":
+				if(value && value[character.ctype]) name = value[character.ctype];
+				break;
+			default:
+				if(value) name = value;
+				break;				
+		}		
+		result[i] = name;
+	};
+	
+	return result;
+};
+CharacterManager.getEquipmentName = function(){
+	
+}
+
+CharacterManager.getItemMaxLevel = function(name){
+	const itemMaxLevel = character.items.reduce((acc, cur) => {
+		if(cur !== null && cur.name === name && acc < cur.level)
+			return cur.level;
+		return acc;
+	}, -1);
+	const equipMaxLevel = 
+		  CharacterManager.getEquipmentLevel(G.items[name].type);
+	
+	return Math.max(itemMaxLevel, equipMaxLevel);
+};
+CharacterManager.getEquipmentLevel = function(type){
+	const fx = CharacterManager.getEquipmentLevel;
+	
+	if(type === "ring"){
+		return Math.max(fx("ring1"), fx("ring2"));
+	}else if(type === "earring"){
+		return Math.max(fx("earring1"), fx("earring2"));
+	}else{
+		const item = character.slots[type];
+		return item === null? -1 : item.level;
+	}	
+};
+
+CharacterManager.equip = async function(name){
+	if(!name) return;	
+	
+	const [bestItem, idx] = CharacterManager.getBestItem(name);
+	if(bestItem !== null){
+		const equipedItem = character.slots[G.items[name].type];
+		if(!equipedItem){
+			await Delay.equip(idx);
+		}else if(equipedItem.level !== undefined &&
+				 equipedItem.level < bestItem.level){
+			await Delay.equip(idx);
+		}
+	}
+};
+CharacterManager.equipAll = async function(){
+	const names = CharacterManager.getEquipmentNameAll();
+	for(let i=0; i<names.length; i++){
+		await CharacterManager.equip(names[i]);	
+	}
+};
+CharacterManager.upgradeEquipment = async function(name, level){	
+	if(CharacterManager.getItemMaxLevel(name) >= level) return;
+	
+	let result;
+	do{
+		result = await UpgradeManager.upgrade(name);
+		if(result.reason) return false;
+	}while(result.level < level || result.failed);
+	await CharacterManager.equip(name);
+}
+CharacterManager.upgradeEquipmentAll = function(level){
+	CharacterManager.upgradeEquipment;
+}
+
+/* END CharacterManager */
+
+/**
+	UpgradeManager
+*/
+function UpgradeManager(){
+	throw new Error('This is a static class');
+}
+UpgradeManager.UPGRADE_TYPE = [
+	"mainhand", "offhand", "helment", "chest", "pants", "shoes", "gloves"	
+];
+UpgradeManager.COMPOUND_TYPE = [
+	"ring1", "ring2", "belt", "amulet", "gloves"	
+];
+
+UpgradeManager.isUpgradeType = function(type){
+	return UpgradeManager.UPGRADE_TYPE.indexOf(type) >= 0;
+};
+UpgradeManager.isCompoundType = function(type){
+	return UpgradeManager.COMPOUND_TYPE.indexOf(type) >= 0;
+};
+
+UpgradeManager.wait = async function(name){
+	while(character.q.upgrade) Util.sleep();
+}
+UpgradeManager.upgrade = async function(name){
+	if(G.items[name] && UpgradeManager.isUpgradeType(G.items[name].type)){
+		let [item, itemIdx] = CharacterManager.getBestItem(name);
+		
+		if(item === null){
+			itemIdx = await ShoppingManager.buyItem(name);
+			if(itemIdx < 0) return { reason: "not_buy_item" };
+			item = character.items[itemIdx];
+		}
+		
+		const grade = item_grade(item);
+		const scrollName = "scroll" + grade;
+		let scrollIdx = locate_item(scrollName);
+		
+		if(scrollIdx < 0){
+			scrollIdx = await ShoppingManager.buyItem(scrollName);
+			if(scrollIdx < 0) return { reason: "not_buy_scroll" };
+		}		
+		if(character.q.upgrade){
+			await UpgradeManager.wait();
+		}
+		if(!character.q.upgrade){
+			return new Promise((resolve) => {
+				upgrade(itemIdx, scrollIdx).then(
+					function(data){
+						resolve(data);
+					},
+					function(data){
+						resolve(data);
+					},
+				);
+			});
+		}
+	}	
+	return { reason: "not_exist_item" };
+};
+UpgradeManager.compound = function(name){
+	
+};
+/* END UpgradeManager */
+
+/**
+	ShoppingManager
+*/
+function ShoppingManager(){
+	throw new Error('This is a static class');
+}
+ShoppingManager.buyItem = function(item, value = 1, msg){ // return index;
+	if(!Number.isInteger(value)) dt.error("Value is not integer - ._buyItem");
+	
+	return new Promise((resolve) => {
+		buy(item, value)
+			.then(function(data){
+				if(msg) game_log(msg);
+				resolve(data.num);
+			})
+			.catch(function(data){
+				switch(data.reason){
+					case "distance":
+						GameManager.setNeedReturn(true);
+						break;
+				}
+				resolve(-1);
+			});
+	});
+};
+ShoppingManager._buyPotion = async function(type, grade, value){
+	await ShoppingManager.buyItem(
+		`${type}pot${grade}`,
+		value,
+		`Bought ${value} ${type.toUpperCase()}P potion.`
+	);
+}
+ShoppingManager.buyHPotion = async function(grade, value) {
+	await ShoppingManager._buyPotion('h', grade, value);
+};
+ShoppingManager.buyMPotion = async function(grade, value) {
+	await ShoppingManager._buyPotion('m', grade, value);
+};
+ShoppingManager.isEnoughHPotion = function(){
+	return CharacterManager.getHPotionCnt(
+		GameManager.Potion.HP_GRADE) >= GameManager.Potion.MIN_CNT;
+};
+ShoppingManager.isEnoughMPotion = function(){
+	return CharacterManager.getMPotionCnt(
+		GameManager.Potion.MP_GRADE) >= GameManager.Potion.MIN_CNT;
+};
+ShoppingManager.isEnoughPotion = function(){
+	const boolHP = ShoppingManager.isEnoughHPotion();
+	const boolMP = ShoppingManager.isEnoughMPotion();
+	return boolHP && boolMP;
+};
+ShoppingManager.refillPotion = async function(){
+	const hgrade = GameManager.Potion.HP_GRADE;
+	const mgrade = GameManager.Potion.MP_GRADE;
+	const targetCnt = GameManager.Potion.REFILL_CNT;
+
+	if(!ShoppingManager.isEnoughHPotion()){
+		await ShoppingManager.buyHPotion(hgrade, 
+			targetCnt - CharacterManager.getHPotionCnt(hgrade));
+	}
+	if(!ShoppingManager.isEnoughMPotion()){
+		await ShoppingManager.buyMPotion(mgrade, 
+			targetCnt - CharacterManager.getMPotionCnt(mgrade));
+	}
+};
+/* END ShoppingManager */
+
+/**
+	PartyManager
+*/
+function PartyManager() {
+    throw new Error('This is a static class');
+}
+PartyManager.INTERVAL_TIME = 10000;
+PartyManager.acceptParty = function(name){
+	dt.log("acceptParty");
+	const intervalID = setInterval(() => {
+		if(!PartyManager.isInParty(name)){
+			accept_party_request(name);	
+		}
+		if(PartyManager.isInParty(name)){
+			clearInterval(intervalID);
+		}
+	}, PartyManager.INTERVAL_TIME);
+};
+PartyManager.requestParty = async function(){
+	dt.log("requestParty");
+	await Delay.send_party_request(GameManager.Player.main);
+	await Delay.send_cm(
+		GameManager.Player.main, GameManager.Code.PARTY_REQUEST);
+};
+PartyManager.isInParty = function(name){
+	name = name || character.name;
+	return !!get_party()[name];
+};
+
+/**
 	GameManager
 */
 function GameManager() {
@@ -399,9 +623,13 @@ GameManager.Player = Object.freeze({
 	priest: "PriestLoL",
 	merchant: "MerchantLoL"
 });
-GameManager.IS_RESTART = false;
+Object.defineProperties(GameManager, {
+	IS_RESTART: { value: false },
+	IS_ALONE: { value: false },
+});
 // END user setting
 //////////////////////////////////////////////
+GameManager.PING = Math.max(character.ping, 200);
 GameManager.Actions = Object.freeze({
 	"HUNTING": 1,
 	"SHOPPING": 2,
@@ -425,88 +653,125 @@ GameManager.checkAction = function(){
 	return GameManager.Actions.HUNTING;
 };
 
+GameManager.Code = Object.freeze({
+	PARTY_REQUEST: "party_request"
+});
+GameManager.handleCodeMessage = function(){
+	character.on("cm",function(m){
+		if(GameManager.isPlayer(m.name)){
+			switch(m.message){
+				case GameManager.Code.PARTY_REQUEST:
+					PartyManager.acceptParty(m.name);
+					break;
+			}
+		}
+	});
+};
+
 GameManager.isMainPlayer = function(){
 	return character.id === GameManager.Player.main;
 };
-GameManager.connectPlayer = function(){	
-	GameManager.startPlayer(GameManager.Player.mage, GameManager.Player.main);
-	GameManager.startPlayer(GameManager.Player.priest, GameManager.Player.main);
-	GameManager.startPlayer(GameManager.Player.merchant);
+GameManager.isPlayer = function(name){
+	return Object.values(GameManager.Player).indexOf(name) >= 0;
 };
-GameManager.startPlayer = function(name, code){
+GameManager.connectPlayer = async function(){
+	const mainPlayer = GameManager.Player.main;
+	await GameManager.startPlayer(GameManager.Player.merchant);
+	if(!GameManager.IS_ALONE){
+		await GameManager.startPlayer(GameManager.Player.mage, mainPlayer);
+		await GameManager.startPlayer(GameManager.Player.priest, mainPlayer);	
+	}
+};
+GameManager.startPlayer = async function(name, code){
 	code = code || name;
-	if(!get_active_characters()[name])
-		start_character(name, code);
-	if(!get_party()[name]) 
-		PartyManager.inviteParty(name);
+	
+	if(GameManager.IS_RESTART && get_active_characters()[name]){
+		await GameManager.stopPlayer(name);
+	}	
+	if(!get_active_characters()[name]){
+		await Delay.start_character(name, code);
+	}
 };
+GameManager.stopPlayer = async function(name){
+	while( get_active_characters()[name] ){
+		await Delay.stop_character(name);
+		await Util.sleep();
+	}
+};
+GameManager.setNeedReturn = function(bool){
+	GameManager.needReturn = bool;
+};
+GameManager.isNeedReturn = function(){
+	return GameManager.needReturn;
+}
 
 GameManager.Action = function(callback){
-	return () => {
-		callback();
+	return async () => {
+		await callback();
 	};
 };
 GameManager.Tick = Object.freeze({
-	hunting: GameManager.Action(function(){
+	hunting: GameManager.Action(async function(){
 		if(character.ctype === "merchant") return;
 		
 		set_message("Hunting");
-		CharacterManager.Actions.usePotion();
-		CharacterManager.Actions.loot();
-		CharacterManager.Actions.hunting();
+		await CharacterManager.Actions.usePotion();
+		await CharacterManager.Actions.loot();
+		await CharacterManager.Actions.hunting();
 	}),
-	shopping: GameManager.Action(function(){
+	shopping: GameManager.Action(async function(){
 		set_message("Shopping");
-		ShoppingManager.refillPotion();
+		await ShoppingManager.refillPotion();
 	}),
-	moving: GameManager.Action(function(){
+	moving: GameManager.Action(async function(){
 		set_message("Smart Moving");
-		CharacterManager.smartMove(GameManager.Monster.TARGET_NAME);
+		await CharacterManager.smartMove(GameManager.Monster.TARGET_NAME);
 	}),
-	returning: GameManager.Action(function(){
+	returning: GameManager.Action(async function(){
 		set_message("Return Town");
-		CharacterManager.returnTown();
+		await CharacterManager.returnTown();
 	}),
-	respawn: GameManager.Action(function(){
+	respawn: GameManager.Action(async function(){
 		set_message("Respawn");
-		respawn();
+		await respawn();
 	})
 });
 
-GameManager.init = function(){
-	GameManager.needReturn = false;
+GameManager.init = async function(){
+	change_target(null);	
+	GameManager.setNeedReturn(false);
+	await CharacterManager.equipAll();	
 	
-	change_target(null);
-	if(GameManager.isMainPlayer()){
+	if(!GameManager.isMainPlayer()){
+		PartyManager.requestParty();
+	}else{
+		GameManager.handleCodeMessage();
 		GameManager.connectPlayer();
 		ObserverManager.create();
-	}else{
-		PartyManager.acceptParty();
 	}
 };
 
 GameManager.idlePlay = function(){
 	setTimeout(async function(){
-		const cycleTime = character.ping;
-		GameManager.init();
+		await GameManager.init();
 	
 		while(true){
-			await Util.sleep(cycleTime)
+			await Util.sleep(GameManager.PING);
 			switch(GameManager.checkAction()){
 				case GameManager.Actions.HUNTING:
-					GameManager.Tick.hunting();
+					await GameManager.Tick.hunting();
 					break;
 				case GameManager.Actions.SHOPPING:
-					GameManager.Tick.shopping();
+					await GameManager.Tick.shopping();
 					break;
 				case GameManager.Actions.MOVING:
-					GameManager.Tick.moving();
+					await GameManager.Tick.moving();
 					break;
 				case GameManager.Actions.RETURN:
-					GameManager.Tick.returning();
+					await GameManager.Tick.returning();
 					break;
 				case GameManager.Actions.RESPAWN:
-					GameManager.Tick.respawn();
+					await GameManager.Tick.respawn();
 					break;
 				default:
 					DevTool.error("unexpected error - GameManager.idlePlay");
@@ -520,7 +785,9 @@ GameManager.idlePlay = function(){
 /**************************************************
 	Main
 **************************************************/
-GameManager.idlePlay();
+// GameManager.idlePlay();
+CharacterManager.upgradeEquipment("coat", 7);
+
 
 /* END Main */
 
